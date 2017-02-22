@@ -12,7 +12,6 @@ import re
 import anafora
 import anafora.select
 
-
 class Scores(object):
 
     def __init__(self):
@@ -28,7 +27,7 @@ class Scores(object):
         self.reference += len(reference)
         self.predicted += len(predicted)
         self.correct += len(reference & predicted)
-
+        
     def update(self, other):
         """
         :param Scores other: scores to merge into this one
@@ -388,9 +387,11 @@ class _OverlappingSpans(object):
 # A type used to capture just a part of an annotation, e.g., just its spans, or just a single property
 _AnnotationView = collections.namedtuple("AnnotationView", ["spans", "name", "value"])
 
+import lxml.etree as etree
+
 
 def score_data(reference_data, predicted_data, include=None, exclude=None,
-               scores_type=Scores, annotation_wrapper=None):
+               scores_type=Scores, annotation_wrapper=None, pairwise=False):
     """
     :param AnaforaData reference_data: reference ("gold standard") Anafora data
     :param AnaforaData predicted_data: predicted (system-generated) Anafora data
@@ -400,6 +401,7 @@ def score_data(reference_data, predicted_data, include=None, exclude=None,
         (type-name, property-name, property-value) tuples
     :param type scores_type: type for calculating matches between predictions and reference
     :param type annotation_wrapper: wrapper type to apply to AnaforaAnnotations
+    :param type pairwise: link pairwise evaluation option; boolean, default False
     :return dict: mapping from (annotation type[, property name[, property value]]) to Scores object
     """
 
@@ -413,7 +415,7 @@ def score_data(reference_data, predicted_data, include=None, exclude=None,
 
     # returns true if this type:property:value is accepted by includes= and excludes=
     select = anafora.select.Select(include, exclude)
-
+    
     # generates a view of just the annotation's spans, and of each of its selected properties
     def _views(annotations):
         views = set()
@@ -425,10 +427,16 @@ def score_data(reference_data, predicted_data, include=None, exclude=None,
                 view_value = ann.properties[view_name]
                 if view_value is None:
                     view_value = '<none>'
-                if select(ann.type, view_name):
-                    views.add(_AnnotationView(spans, (ann.type, view_name), view_value))
                 if select(ann.type, view_name, view_value) and not isinstance(view_value, anafora.AnaforaAnnotation):
                     views.add(_AnnotationView(spans, (ann.type, view_name, view_value), view_value))
+                if select(ann.type, view_name, '<not-none>') and isinstance(view_value, anafora.AnaforaAnnotation):
+                    if pairwise and type(view_value) is not str:
+                        view_value = view_value.xml.find('./id').text
+                    views.add(_AnnotationView(spans, (ann.type, view_name, '<not-none>'), view_value))
+                if select(ann.type, view_name):
+                    if pairwise and type(view_value) is not str:
+                        view_value = view_value.xml.find('./id').text
+                    views.add(_AnnotationView(spans, (ann.type, view_name), view_value))
         return views
 
     # get reference and predicted annotations
@@ -460,7 +468,7 @@ def score_data(reference_data, predicted_data, include=None, exclude=None,
         if select(ann_type):
             result["*"].add(type_reference_annotations, type_predicted_annotations)
             result[ann_type].add(type_reference_annotations, type_predicted_annotations)
-
+            
         # update span and property scores
         reference_views = _views(type_reference_annotations)
         predicted_views = _views(type_predicted_annotations)
@@ -495,7 +503,7 @@ def _load(xml_path):
 
 
 def score_dirs(reference_dir, predicted_dir, xml_name_regex="[.]xml$", text_dir=None,
-               include=None, exclude=None, scores_type=Scores, annotation_wrapper=None):
+               include=None, exclude=None, scores_type=Scores, annotation_wrapper=None, pairwise=False):
     """
     :param string reference_dir: directory containing reference ("gold standard") Anafora XML directories
     :param string predicted_dir: directory containing predicted (system-generated) Anafora XML directories
@@ -508,6 +516,7 @@ def score_dirs(reference_dir, predicted_dir, xml_name_regex="[.]xml$", text_dir=
         (type-name, property-name, property-value) tuples
     :param type scores_type: type for calculating matches between predictions and reference
     :param type annotation_wrapper: wrapper object to apply to AnaforaAnnotations
+    :param type pairwise: link pairwise evaluation option; boolean, default False
     :return iter: an iterator of (file-name, name-to-scores) where name-to-scores is a mapping from
         (annotation type[, property name[, property value]]) to a Scores object
     """
@@ -584,7 +593,8 @@ def score_dirs(reference_dir, predicted_dir, xml_name_regex="[.]xml$", text_dir=
 
         # score this data and update the overall scores
         named_scores = score_data(reference_data, predicted_data, include, exclude,
-                                  scores_type=scores_type, annotation_wrapper=annotation_wrapper)
+                                  scores_type=scores_type, annotation_wrapper=annotation_wrapper,
+                                  pairwise=pairwise)
         for name, scores in named_scores.items():
 
             # if there were some predictions, and if we're using scores that keep track of errors, log the errors
@@ -695,6 +705,13 @@ def _print_merged_scores(file_named_scores, scores_type):
     def _score_name(x):
         return ":".join(x) if isinstance(x, tuple) else x
 
+    def _total_scores(ref, pred, corr):
+        p = corr/pred
+        r = corr/ref
+        return (p, r, 2*r*p/(r+p))
+        
+    total_reference, total_predicted, total_correct = 0, 0, 0
+    
     print("{0:40}\t{1:^5}\t{2:^5}\t{3:^5}\t{4:^5}\t{5:^5}\t{6:^5}".format(
         "", "ref", "pred", "corr", "P", "R", "F1"))
     for name in sorted(all_named_scores, key=_score_name):
@@ -702,8 +719,18 @@ def _print_merged_scores(file_named_scores, scores_type):
         print("{0!s:40}\t{1!s:5}\t{2!s:5}\t{3!s:5}\t{4:5.3f}\t{5:5.3f}\t{6:5.3f}".format(
             _score_name(name), scores.reference, scores.predicted, scores.correct,
             scores.precision(), scores.recall(), scores.f1()))
-
-
+        if len(name) == 2:
+            total_reference += scores.reference
+            total_predicted += scores.predicted
+            total_correct += scores.correct
+    
+    if total_reference > 0 and total_predicted > 0:
+        total = _total_scores(total_reference, total_predicted, total_correct)
+        print("{0!s:40}\t{1!s:5}\t{2!s:5}\t{3!s:5}\t{4:5.3f}\t{5:5.3f}\t{6:5.3f}".format(
+                "Total", total_reference, total_predicted, total_correct,
+                total[0], total[1], total[2]))
+    
+            
 if __name__ == "__main__":
     def split_tuple_on_colons(string):
         result = tuple(string.split(":"))
@@ -746,6 +773,8 @@ if __name__ == "__main__":
                         help="Count predicted annotation spans as correct if they overlap by one character or more " +
                              "with a reference annotation span. Not intended as a real evaluation method (since what " +
                              "to do with multiple matches is not well defined) but useful for debugging purposes.")
+    parser.add_argument("--pairwise", dest="pairwise", action="store_true",
+                        help="Pairwise link evaluation.")
     args = parser.parse_args()
     basic_config_kwargs = {"format": "%(levelname)s:%(message)s"}
     if args.scores_type == DebuggingScores:
@@ -761,7 +790,8 @@ if __name__ == "__main__":
             include=args.include,
             exclude=args.exclude,
             scores_type=args.scores_type,
-            annotation_wrapper=args.annotation_wrapper)
+            annotation_wrapper=args.annotation_wrapper,
+            pairwise = args.pairwise)
     else:
         _file_named_scores = score_annotators(
             anafora_dir=args.reference_dir,
