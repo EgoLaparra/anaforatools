@@ -704,13 +704,6 @@ def _print_merged_scores(file_named_scores, scores_type):
 
     def _score_name(x):
         return ":".join(x) if isinstance(x, tuple) else x
-
-    def _total_scores(ref, pred, corr):
-        p = corr/pred
-        r = corr/ref
-        return (p, r, 2*r*p/(r+p))
-        
-    total_reference, total_predicted, total_correct = 0, 0, 0
     
     print("{0:40}\t{1:^5}\t{2:^5}\t{3:^5}\t{4:^5}\t{5:^5}\t{6:^5}".format(
         "", "ref", "pred", "corr", "P", "R", "F1"))
@@ -718,18 +711,7 @@ def _print_merged_scores(file_named_scores, scores_type):
         scores = all_named_scores[name]
         print("{0!s:40}\t{1!s:5}\t{2!s:5}\t{3!s:5}\t{4:5.3f}\t{5:5.3f}\t{6:5.3f}".format(
             _score_name(name), scores.reference, scores.predicted, scores.correct,
-            scores.precision(), scores.recall(), scores.f1()))
-        if len(name) == 2:
-            total_reference += scores.reference
-            total_predicted += scores.predicted
-            total_correct += scores.correct
-    
-    if total_reference > 0 and total_predicted > 0:
-        total = _total_scores(total_reference, total_predicted, total_correct)
-        print("{0!s:40}\t{1!s:5}\t{2!s:5}\t{3!s:5}\t{4:5.3f}\t{5:5.3f}\t{6:5.3f}".format(
-                "Total", total_reference, total_predicted, total_correct,
-                total[0], total[1], total[2]))
-    
+            scores.precision(), scores.recall(), scores.f1()))    
             
 if __name__ == "__main__":
     def split_tuple_on_colons(string):
