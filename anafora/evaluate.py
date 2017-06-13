@@ -431,11 +431,11 @@ def score_data(reference_data, predicted_data, include=None, exclude=None,
                     views.add(_AnnotationView(spans, (ann.type, view_name, view_value), view_value))
                 if select(ann.type, view_name, '<not-none>') and isinstance(view_value, anafora.AnaforaAnnotation):
                     if pairwise and type(view_value) is not str:
-                        view_value = view_value.xml.find('./id').text
+                        view_value = view_value.xml.find('./span').text
                     views.add(_AnnotationView(spans, (ann.type, view_name, '<not-none>'), view_value))
                 if select(ann.type, view_name):
                     if pairwise and type(view_value) is not str:
-                        view_value = view_value.xml.find('./id').text
+                        view_value = view_value.xml.find('./span').text
                     views.add(_AnnotationView(spans, (ann.type, view_name), view_value))
         return views
 
