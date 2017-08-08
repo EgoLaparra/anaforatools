@@ -10,7 +10,10 @@ def to_text(timeml_path):
     :param xml.etree.ElementTree.Element timeml_path: path of the TimeML XML
     :return string: the (plain) text content of the XML
     """
-    return ''.join(anafora.ElementTree.parse(timeml_path).getroot().itertext())
+    try:
+        return ''.join(anafora.ElementTree.parse(timeml_path).getroot().find('TEXT').itertext())
+    except AttributeError:
+        return ''.join(anafora.ElementTree.parse(timeml_path).getroot().itertext())
 
 
 def to_anafora_data(timeml_path):
@@ -31,9 +34,12 @@ def to_anafora_data(timeml_path):
     ref_id_attrs = {"eventID", "signalID", "beginPoint", "endPoint", "valueFromFunction", "anchorTimeID",
                     "eventInstanceID", "timeID", "signalID", "relatedToEventInstance", "relatedToTime",
                     "subordinatedEventInstance", "tagID"}
-    text = to_text(timeml_path)
+    text = re.sub(r"(\r\n)|\r|\n", r"\n",to_text(timeml_path))
     data = anafora.AnaforaData()
-    root = anafora.ElementTree.parse(timeml_path).getroot()
+    try:
+        root = anafora.ElementTree.parse(timeml_path).getroot().find('TEXT')
+    except AttributeError:
+        root = anafora.ElementTree.parse(timeml_path).getroot()
 
     prefix_to_char = {'t': 'e', 'e': 'e', 's': 'e', 'ei': 'r', 'l': 'r'}
     timeml_id_to_anafora_id = {}
@@ -64,17 +70,18 @@ def to_anafora_data(timeml_path):
             data.annotations.append(annotation)
 
         if elem.text is not None:
-            offset += len(elem.text)
+            offset += len(re.sub(r"(\r\n)|\r|\n", r"\n",elem.text))
         for child in elem:
             offset = add_annotations_from(child, offset)
 
         if annotation is not None and isinstance(annotation, anafora.AnaforaEntity):
             annotation.spans = ((start, offset),)
-            if elem.text != text[start:offset]:
+            if re.sub(r"(\r\n)|\r|\n", r"\n",elem.text) != text[start:offset]:
                 raise ValueError('{0}: "{1}" != "{2}"'.format(timeml_path, elem.text, text[start:offset]))
 
         if elem.tail is not None:
-            offset += len(elem.tail)
+            offset += len(re.sub(r"(\r\n)|\r|\n", r"\n", elem.tail))
+  
         return offset
 
     add_annotations_from(root)
