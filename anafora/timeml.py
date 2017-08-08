@@ -5,15 +5,20 @@ import re
 import anafora
 
 
-def to_text(timeml_path):
+def to_text(timeml_path, test_mode=False):
     """
     :param xml.etree.ElementTree.Element timeml_path: path of the TimeML XML
     :return string: the (plain) text content of the XML
     """
-    return ''.join(anafora.ElementTree.parse(timeml_path).getroot().itertext())
+    if test_mode:
+        try:
+            return ''.join(anafora.ElementTree.parse(timeml_path).getroot().find('TEXT').itertext())
+        except AttributeError:
+            return ''.join(anafora.ElementTree.parse(timeml_path).getroot().itertext())
+    else:
+        return ''.join(anafora.ElementTree.parse(timeml_path).getroot().itertext())
 
-
-def to_anafora_data(timeml_path):
+def to_anafora_data(timeml_path, test_mode=False):
     """
     :param xml.etree.ElementTree.Element timeml_path: path of the TimeML XML
     :return anafora.AnaforaData: an Anafora version of the TimeML annotations
@@ -31,9 +36,15 @@ def to_anafora_data(timeml_path):
     ref_id_attrs = {"eventID", "signalID", "beginPoint", "endPoint", "valueFromFunction", "anchorTimeID",
                     "eventInstanceID", "timeID", "signalID", "relatedToEventInstance", "relatedToTime",
                     "subordinatedEventInstance", "tagID"}
-    text = to_text(timeml_path)
+    text = re.sub(r"(\r\n)|\r|\n", r"\n",to_text(timeml_path, test_mode))
     data = anafora.AnaforaData()
-    root = anafora.ElementTree.parse(timeml_path).getroot()
+    if test_mode:
+        try:
+            root = anafora.ElementTree.parse(timeml_path).getroot().find('TEXT')
+        except AttributeError:
+            root = anafora.ElementTree.parse(timeml_path).getroot()
+    else:
+        root = anafora.ElementTree.parse(timeml_path).getroot()
 
     prefix_to_char = {'t': 'e', 'e': 'e', 's': 'e', 'ei': 'r', 'l': 'r'}
     timeml_id_to_anafora_id = {}
@@ -64,24 +75,25 @@ def to_anafora_data(timeml_path):
             data.annotations.append(annotation)
 
         if elem.text is not None:
-            offset += len(elem.text)
+            offset += len(re.sub(r"(\r\n)|\r|\n", r"\n",elem.text))
         for child in elem:
             offset = add_annotations_from(child, offset)
 
         if annotation is not None and isinstance(annotation, anafora.AnaforaEntity):
             annotation.spans = ((start, offset),)
-            if elem.text != text[start:offset]:
+            if re.sub(r"(\r\n)|\r|\n", r"\n",elem.text) != text[start:offset]:
                 raise ValueError('{0}: "{1}" != "{2}"'.format(timeml_path, elem.text, text[start:offset]))
 
         if elem.tail is not None:
-            offset += len(elem.tail)
+            offset += len(re.sub(r"(\r\n)|\r|\n", r"\n", elem.tail))
+  
         return offset
 
     add_annotations_from(root)
     return data
 
 
-def _timeml_dir_to_anafora_dir(timeml_dir, anafora_dir, schema_name="TimeML"):
+def _timeml_dir_to_anafora_dir(timeml_dir, anafora_dir, schema_name="TimeML", test_mode=False):
     for root, _, file_names in os.walk(timeml_dir):
         if root.startswith(timeml_dir):
             sub_dir = root[len(timeml_dir):].lstrip(os.path.sep)
@@ -91,8 +103,8 @@ def _timeml_dir_to_anafora_dir(timeml_dir, anafora_dir, schema_name="TimeML"):
         for file_name in file_names:
             if file_name.endswith(".tml"):
                 file_path = os.path.join(root, file_name)
-                text = to_text(file_path)
-                data = to_anafora_data(file_path)
+                text = to_text(file_path, test_mode)
+                data = to_anafora_data(file_path, test_mode)
                 data.indent()
 
                 anafora_file_name = file_name[:-4]
@@ -112,5 +124,6 @@ if __name__ == "__main__":
     parser.add_argument("--timeml-dir", required=True)
     parser.add_argument("--anafora-dir", required=True)
     parser.add_argument("--schema-name", default="TimeML")
+    parser.add_argument("--test-mode", action="store_true")
     args = parser.parse_args()
-    _timeml_dir_to_anafora_dir(args.timeml_dir, args.anafora_dir, args.schema_name)
+    _timeml_dir_to_anafora_dir(args.timeml_dir, args.anafora_dir, args.schema_name, args.test_mode)
